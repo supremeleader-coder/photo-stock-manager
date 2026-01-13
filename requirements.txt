@@ -10,9 +10,11 @@ openai>=1.0.0
 # Optional: HEIC/HEIF support
 pillow-heif>=0.13.0
 
+# Database (Phase 1)
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+python-dotenv>=1.0.0
+
 # Future web interface (Phase 3)
 # flask>=3.0.0
 # flask-cors>=4.0.0
-
-# Future database (Phase 2)
-# sqlalchemy>=2.0.0

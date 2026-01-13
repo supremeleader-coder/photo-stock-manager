@@ -57,3 +57,7 @@ sample_photos/
 # Logs
 *.log
 logs/
+
+# Claude Code temp files
+.claude/
+tmpclaude-*
