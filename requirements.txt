@@ -15,6 +15,9 @@ sqlalchemy>=2.0.0
 psycopg2-binary>=2.9.0
 python-dotenv>=1.0.0
 
+# CLI utilities (Phase 2)
+tqdm>=4.65.0
+
 # Future web interface (Phase 3)
 # flask>=3.0.0
 # flask-cors>=4.0.0
