@@ -2,9 +2,16 @@
 """
 CLI entry point for the image processing pipeline.
 
+Processing Modes:
+    Default: Process new images only, skip existing
+    --init:  Reprocess all images from scratch (clears database)
+    --update FIELDS: Update specific fields for existing images
+
 Usage:
     python run_pipeline.py /path/to/photos
-    python run_pipeline.py /path/to/photos --no-ai --verbose
+    python run_pipeline.py /path/to/photos --init
+    python run_pipeline.py /path/to/photos --update location
+    python run_pipeline.py /path/to/photos --update ai_tags,location
     python run_pipeline.py --retry-failed
 """
 
@@ -14,7 +21,8 @@ import sys
 from pathlib import Path
 
 from db.database import verify_connection, dispose_engine
-from pipeline.processor import ImageProcessor, PipelineStats
+from pipeline.processor import ImageProcessor, ProcessingMode, PipelineStats
+from pipeline.storage_handler import VALID_UPDATE_FIELDS
 
 
 def setup_logging(verbose: bool = False, log_file: str | None = None) -> None:
@@ -75,11 +83,39 @@ def run_pipeline(args: argparse.Namespace) -> int:
         print(f"ERROR: Path is not a directory: {input_path}")
         return 1
 
+    # Determine processing mode
+    mode = ProcessingMode.DEFAULT
+    update_fields = []
+
+    if args.init:
+        mode = ProcessingMode.INIT
+        print("WARNING: INIT mode will delete all existing records!")
+        confirm = input("Type 'yes' to confirm: ")
+        if confirm.lower() != 'yes':
+            print("Aborted.")
+            return 0
+    elif args.update:
+        mode = ProcessingMode.UPDATE
+        update_fields = [f.strip() for f in args.update.split(",")]
+        # Validate fields
+        invalid = set(update_fields) - VALID_UPDATE_FIELDS
+        if invalid:
+            print(f"ERROR: Invalid update fields: {invalid}")
+            print(f"Valid fields: {', '.join(sorted(VALID_UPDATE_FIELDS))}")
+            return 1
+
+    # Determine if AI tagging is needed
+    enable_ai = not args.no_ai
+    if mode == ProcessingMode.UPDATE and "ai_tags" not in update_fields:
+        enable_ai = False  # No need for AI if not updating tags
+
     # Initialize processor
     processor = ImageProcessor(
-        skip_existing=not args.reprocess,
-        skip_duplicates=not args.allow_duplicates,
-        enable_ai_tagging=not args.no_ai,
+        mode=mode,
+        update_fields=update_fields if mode == ProcessingMode.UPDATE else None,
+        skip_existing=not args.reprocess and mode == ProcessingMode.DEFAULT,
+        skip_duplicates=not args.allow_duplicates and mode == ProcessingMode.DEFAULT,
+        enable_ai_tagging=enable_ai,
         ai_model=args.model,
         max_tags=args.max_tags,
         use_tag_cache=not args.no_cache,
@@ -89,11 +125,15 @@ def run_pipeline(args: argparse.Namespace) -> int:
     # Print configuration
     print("Pipeline Configuration:")
     print(f"  Input path: {input_path}")
+    print(f"  Mode: {mode.value}")
+    if mode == ProcessingMode.UPDATE:
+        print(f"  Update fields: {', '.join(update_fields)}")
     print(f"  Recursive: {args.recursive}")
-    print(f"  Skip existing: {not args.reprocess}")
-    print(f"  Skip duplicates: {not args.allow_duplicates}")
-    print(f"  AI tagging: {not args.no_ai}")
-    if not args.no_ai:
+    if mode == ProcessingMode.DEFAULT:
+        print(f"  Skip existing: {not args.reprocess}")
+        print(f"  Skip duplicates: {not args.allow_duplicates}")
+    print(f"  AI tagging: {enable_ai}")
+    if enable_ai:
         print(f"  AI model: {args.model}")
         print(f"  Max tags: {args.max_tags}")
         print(f"  Use cache: {not args.no_cache}")
@@ -118,10 +158,28 @@ def main() -> int:
         description="Process images: extract metadata, generate AI tags, store in database.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
+Processing Modes:
+  Default (no flag): Process new images only, skip existing ones
+  --init:            Reprocess ALL images from scratch (clears database first)
+  --update FIELDS:   Update only specific fields for existing images
+
+Update Fields (comma-separated):
+  Groups (shortcuts):
+    metadata   - All metadata: size, dimensions, format, camera, GPS
+    location   - location_country, location_name
+    ai_tags    - AI-generated keywords
+
+  Individual columns:
+    location_country, location_name, file_size, format, width, height,
+    exif_camera_make, exif_camera_model, exif_gps_latitude,
+    exif_gps_longitude, exif_date_taken
+
 Examples:
-  python run_pipeline.py /path/to/photos
+  python run_pipeline.py /path/to/photos                    # Process new images
+  python run_pipeline.py /path/to/photos --init             # Reprocess all
+  python run_pipeline.py /path/to/photos --update location  # Update location only
+  python run_pipeline.py /path/to/photos --update ai_tags,location
   python run_pipeline.py /path/to/photos -v --no-ai
-  python run_pipeline.py /path/to/photos --model gpt-4o --max-tags 50
   python run_pipeline.py --retry-failed -v
         """
     )
@@ -131,6 +189,19 @@ Examples:
         "path",
         nargs="?",
         help="Path to directory containing images"
+    )
+
+    # Processing mode options
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        "--init",
+        action="store_true",
+        help="Reprocess all images from scratch (deletes existing records)"
+    )
+    mode_group.add_argument(
+        "--update",
+        metavar="FIELDS",
+        help="Update specific fields only (metadata, location, ai_tags)"
     )
 
     # Processing options
@@ -149,7 +220,7 @@ Examples:
     parser.add_argument(
         "--reprocess",
         action="store_true",
-        help="Reprocess images already in database"
+        help="Reprocess images already in database (default mode only)"
     )
     parser.add_argument(
         "--allow-duplicates",

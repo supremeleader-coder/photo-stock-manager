@@ -14,7 +14,7 @@ from pipeline.duplicate_handler import DuplicateHandler
 from pipeline.metadata_extractor import MetadataExtractor
 from pipeline.ai_tagger import AITagger
 from pipeline.storage_handler import StorageHandler
-from pipeline.processor import ImageProcessor
+from pipeline.processor import ImageProcessor, ProcessingMode
 
 __all__ = [
     "FileScanner",
@@ -24,4 +24,5 @@ __all__ = [
     "AITagger",
     "StorageHandler",
     "ImageProcessor",
+    "ProcessingMode",
 ]

@@ -7,11 +7,17 @@ Coordinates all pipeline stages:
 3. Metadata extraction
 4. AI tagging
 5. Database storage
+
+Processing modes:
+- DEFAULT: Skip existing images, process new ones only
+- INIT: Reprocess all images from scratch (deletes existing records)
+- UPDATE: Update only specific fields for existing images
 """
 
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import Callable
 
@@ -20,9 +26,16 @@ from pipeline.file_scanner import FileScanner
 from pipeline.duplicate_handler import DuplicateHandler
 from pipeline.metadata_extractor import MetadataExtractor
 from pipeline.ai_tagger import AITagger
-from pipeline.storage_handler import StorageHandler
+from pipeline.storage_handler import StorageHandler, VALID_UPDATE_FIELDS, FIELD_GROUPS
 
 logger = logging.getLogger(__name__)
+
+
+class ProcessingMode(Enum):
+    """Processing mode for the pipeline."""
+    DEFAULT = "default"  # Skip existing, process new only
+    INIT = "init"        # Reprocess everything from scratch
+    UPDATE = "update"    # Update specific fields only
 
 
 @dataclass
@@ -33,6 +46,8 @@ class ProcessingResult:
     image_id: int | None = None
     skipped: bool = False
     skip_reason: str | None = None
+    updated: bool = False  # True if this was an update operation
+    updated_fields: list[str] = field(default_factory=list)
     error: str | None = None
     tags_count: int = 0
     processing_time: float = 0.0
@@ -43,8 +58,11 @@ class PipelineStats:
     """Statistics for a pipeline run."""
     total_found: int = 0
     processed: int = 0
+    updated: int = 0  # Count of updated records
     skipped: int = 0
     failed: int = 0
+    mode: ProcessingMode = ProcessingMode.DEFAULT
+    update_fields: list[str] = field(default_factory=list)
     start_time: datetime = field(default_factory=datetime.utcnow)
     end_time: datetime | None = None
     results: list[ProcessingResult] = field(default_factory=list)
@@ -62,12 +80,25 @@ class PipelineStats:
             "=" * 50,
             "Pipeline Processing Complete",
             "=" * 50,
+            f"Mode: {self.mode.value}",
+        ]
+
+        if self.mode == ProcessingMode.UPDATE:
+            lines.append(f"Updated fields: {', '.join(self.update_fields)}")
+
+        lines.extend([
             f"Total images found: {self.total_found}",
             f"Successfully processed: {self.processed}",
-            f"Skipped (duplicates/existing): {self.skipped}",
+        ])
+
+        if self.updated > 0:
+            lines.append(f"Updated existing: {self.updated}")
+
+        lines.extend([
+            f"Skipped: {self.skipped}",
             f"Failed: {self.failed}",
             f"Duration: {self.duration_seconds:.1f} seconds",
-        ]
+        ])
 
         if self.failed > 0:
             lines.append("")
@@ -89,10 +120,17 @@ class ImageProcessor:
     3. Extracts metadata
     4. Generates AI tags
     5. Stores in database
+
+    Processing modes:
+    - DEFAULT: Skip existing images, process new ones only
+    - INIT: Reprocess all images from scratch
+    - UPDATE: Update only specific fields for existing images
     """
 
     def __init__(
         self,
+        mode: ProcessingMode = ProcessingMode.DEFAULT,
+        update_fields: list[str] | None = None,
         skip_existing: bool = True,
         skip_duplicates: bool = True,
         enable_ai_tagging: bool = True,
@@ -105,17 +143,34 @@ class ImageProcessor:
         Initialize the image processor.
 
         Args:
-            skip_existing: Skip images already in database.
-            skip_duplicates: Skip content-duplicate images.
+            mode: Processing mode (DEFAULT, INIT, UPDATE).
+            update_fields: Fields to update in UPDATE mode. Can be group names
+                          (metadata, location, ai_tags) or column names
+                          (location_country, location_name, etc.).
+            skip_existing: Skip images already in database (DEFAULT mode only).
+            skip_duplicates: Skip content-duplicate images (DEFAULT mode only).
             enable_ai_tagging: Whether to generate AI tags.
             ai_model: OpenAI model for tagging.
             max_tags: Maximum tags per image.
             use_tag_cache: Use cached AI tags.
             progress_callback: Callback(current, total, filename) for progress.
         """
+        self.mode = mode
+        self.update_fields = update_fields or []
         self.skip_existing = skip_existing
         self.skip_duplicates = skip_duplicates
         self.enable_ai_tagging = enable_ai_tagging
+
+        # Validate update fields
+        if self.mode == ProcessingMode.UPDATE:
+            invalid_fields = set(self.update_fields) - VALID_UPDATE_FIELDS
+            if invalid_fields:
+                raise ValueError(
+                    f"Invalid update fields: {invalid_fields}. "
+                    f"Valid fields: {sorted(VALID_UPDATE_FIELDS)}"
+                )
+            if not self.update_fields:
+                raise ValueError("UPDATE mode requires at least one field to update")
 
         # Initialize components
         self.scanner = FileScanner()
@@ -145,9 +200,15 @@ class ImageProcessor:
             PipelineStats with processing results.
         """
         directory = Path(directory)
-        stats = PipelineStats()
+        stats = PipelineStats(mode=self.mode, update_fields=self.update_fields)
 
-        logger.info(f"Starting pipeline for: {directory}")
+        logger.info(f"Starting pipeline for: {directory} (mode: {self.mode.value})")
+
+        # Handle INIT mode - clear existing records first
+        if self.mode == ProcessingMode.INIT:
+            logger.warning("INIT mode: Clearing existing database records...")
+            deleted = self.storage.delete_all()
+            logger.info(f"Deleted {deleted} existing records")
 
         # Stage 1: File Discovery
         self.scanner.recursive = recursive
@@ -161,16 +222,23 @@ class ImageProcessor:
 
         logger.info(f"Found {len(images)} images to process")
 
-        # Stage 2-5: Process each image
+        # Stage 2-5: Process each image based on mode
         for i, filepath in enumerate(images, 1):
             if self.progress_callback:
                 self.progress_callback(i, len(images), filepath.name)
 
-            result = self.process_single(filepath)
+            if self.mode == ProcessingMode.UPDATE:
+                result = self._update_single(filepath)
+            else:
+                result = self.process_single(filepath)
+
             stats.results.append(result)
 
             if result.success:
-                stats.processed += 1
+                if result.updated:
+                    stats.updated += 1
+                else:
+                    stats.processed += 1
             elif result.skipped:
                 stats.skipped += 1
             else:
@@ -245,6 +313,90 @@ class ImageProcessor:
             result.error = str(e)
             result.processing_time = time.time() - start_time
             logger.error(f"Failed to process {filepath.name}: {e}")
+
+        return result
+
+    def _update_single(self, filepath: str | Path) -> ProcessingResult:
+        """
+        Update specific fields for an existing image.
+
+        Args:
+            filepath: Path to the image file.
+
+        Returns:
+            ProcessingResult with outcome details.
+        """
+        import time
+        start_time = time.time()
+
+        filepath = Path(filepath).resolve()
+        result = ProcessingResult(filepath=filepath, success=False)
+
+        try:
+            # Find existing record
+            existing = self.storage.get_image_by_filepath(str(filepath))
+            if not existing:
+                # No existing record - skip in update mode
+                result.skipped = True
+                result.skip_reason = "Not in database"
+                logger.debug(f"Skipping {filepath.name}: not in database")
+                return result
+
+            result.image_id = existing.id
+
+            # Expand field groups to determine what data we need
+            columns_needed = set()
+            for field in self.update_fields:
+                if field in FIELD_GROUPS:
+                    columns_needed.update(FIELD_GROUPS[field])
+                else:
+                    columns_needed.add(field)
+
+            # Extract data based on requested columns
+            metadata = None
+            ai_tags = None
+
+            # Need metadata if any non-ai_tags column is requested
+            needs_metadata = bool(columns_needed - {"ai_tags"})
+            needs_ai_tags = "ai_tags" in columns_needed
+
+            if needs_metadata:
+                logger.debug(f"Extracting metadata: {filepath.name}")
+                metadata = self.metadata_extractor.extract(filepath)
+
+            if needs_ai_tags and self.ai_tagger:
+                logger.debug(f"Generating AI tags: {filepath.name}")
+                try:
+                    ai_tags = self.ai_tagger.tag(filepath)
+                    result.tags_count = len(ai_tags)
+                except Exception as e:
+                    logger.warning(f"AI tagging failed for {filepath.name}: {e}")
+                    ai_tags = None
+
+            # Update the record
+            success = self.storage.update_fields(
+                existing.id,
+                self.update_fields,
+                metadata=metadata,
+                ai_tags=ai_tags
+            )
+
+            if success:
+                result.success = True
+                result.updated = True
+                result.updated_fields = self.update_fields.copy()
+                result.processing_time = time.time() - start_time
+                logger.info(
+                    f"Updated: {filepath.name} (ID: {existing.id}, "
+                    f"fields: {', '.join(self.update_fields)})"
+                )
+            else:
+                result.error = "Update failed"
+
+        except Exception as e:
+            result.error = str(e)
+            result.processing_time = time.time() - start_time
+            logger.error(f"Failed to update {filepath.name}: {e}")
 
         return result
 
@@ -324,6 +476,8 @@ class ImageProcessor:
 def process_folder(
     folder: str | Path,
     recursive: bool = True,
+    mode: ProcessingMode = ProcessingMode.DEFAULT,
+    update_fields: list[str] | None = None,
     skip_existing: bool = True,
     enable_ai: bool = True,
     verbose: bool = False
@@ -334,7 +488,9 @@ def process_folder(
     Args:
         folder: Path to folder to process.
         recursive: Scan subdirectories.
-        skip_existing: Skip already-processed images.
+        mode: Processing mode (DEFAULT, INIT, UPDATE).
+        update_fields: Fields to update in UPDATE mode.
+        skip_existing: Skip already-processed images (DEFAULT mode).
         enable_ai: Enable AI tagging.
         verbose: Print progress to console.
 
@@ -346,6 +502,8 @@ def process_folder(
             print(f"[{current}/{total}] Processing: {filename}")
 
     processor = ImageProcessor(
+        mode=mode,
+        update_fields=update_fields,
         skip_existing=skip_existing,
         enable_ai_tagging=enable_ai,
         progress_callback=progress if verbose else None
