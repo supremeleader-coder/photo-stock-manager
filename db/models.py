@@ -90,6 +90,9 @@ class Image(Base):
     location_country: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     location_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
+    # Thumbnail
+    thumbnail_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     # AI-generated tags (stored as JSON array)
     ai_tags: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True, default=list)
 
@@ -148,6 +151,7 @@ class Image(Base):
             "exif_date_taken": self.exif_date_taken.isoformat() if self.exif_date_taken else None,
             "location_country": self.location_country,
             "location_name": self.location_name,
+            "thumbnail_path": self.thumbnail_path,
             "ai_tags": self.ai_tags or [],
             "processing_status": self.processing_status.value,
             "error_message": self.error_message,
