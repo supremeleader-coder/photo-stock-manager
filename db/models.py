@@ -86,6 +86,10 @@ class Image(Base):
     exif_gps_longitude: Mapped[Optional[float]] = mapped_column(Numeric(10, 7), nullable=True)
     exif_date_taken: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
+    # Location (from reverse geocoding GPS coordinates)
+    location_country: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    location_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
     # AI-generated tags (stored as JSON array)
     ai_tags: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True, default=list)
 
@@ -142,6 +146,8 @@ class Image(Base):
             "exif_gps_latitude": float(self.exif_gps_latitude) if self.exif_gps_latitude else None,
             "exif_gps_longitude": float(self.exif_gps_longitude) if self.exif_gps_longitude else None,
             "exif_date_taken": self.exif_date_taken.isoformat() if self.exif_date_taken else None,
+            "location_country": self.location_country,
+            "location_name": self.location_name,
             "ai_tags": self.ai_tags or [],
             "processing_status": self.processing_status.value,
             "error_message": self.error_message,
