@@ -32,6 +32,7 @@ FIELD_GROUPS = {
     ],
     "location": ["location_country", "location_name"],
     "ai_tags": ["ai_tags"],
+    "thumbnail_path": ["thumbnail_path"],
 }
 
 # All valid individual column names
@@ -41,6 +42,7 @@ VALID_COLUMNS = {
     "exif_gps_latitude", "exif_gps_longitude", "exif_date_taken",
     "location_country", "location_name",
     "ai_tags",
+    "thumbnail_path",
 }
 
 # Combined valid field names (groups + individual columns)
@@ -292,7 +294,8 @@ class StorageHandler:
         image_id: int,
         fields: list[str],
         metadata: ImageMetadata | None = None,
-        ai_tags: list[str] | None = None
+        ai_tags: list[str] | None = None,
+        thumbnail_path: str | None = None
     ) -> bool:
         """
         Update only specific fields for an existing image.
@@ -300,10 +303,10 @@ class StorageHandler:
         Args:
             image_id: ID of the image record.
             fields: List of fields to update. Can be group names ('metadata',
-                   'location', 'ai_tags') or individual column names
-                   ('location_country', 'location_name', etc.).
+                   'location', 'ai_tags', 'thumbnail') or individual column names.
             metadata: New metadata (required for metadata/location fields).
             ai_tags: New AI tags (required for 'ai_tags' field).
+            thumbnail_path: Path to thumbnail (required for 'thumbnail' field).
 
         Returns:
             True if update successful, False otherwise.
@@ -329,6 +332,9 @@ class StorageHandler:
                 if column == "ai_tags" and ai_tags is not None:
                     image.ai_tags = ai_tags
                     updated_fields.append("ai_tags")
+                elif column == "thumbnail_path" and thumbnail_path is not None:
+                    image.thumbnail_path = thumbnail_path
+                    updated_fields.append("thumbnail_path")
                 elif metadata:
                     if column == "file_size":
                         image.file_size = metadata.file_size

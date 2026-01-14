@@ -67,6 +67,9 @@ def run_pipeline(args: argparse.Namespace) -> int:
             ai_model=args.model,
             max_tags=args.max_tags,
             use_tag_cache=not args.no_cache,
+            enable_thumbnails=not args.no_thumbnails,
+            thumbnail_dir=args.thumbnail_dir,
+            thumbnail_width=args.thumbnail_width,
             progress_callback=print_progress if args.verbose else None
         )
         stats = processor.retry_failed()
@@ -109,6 +112,11 @@ def run_pipeline(args: argparse.Namespace) -> int:
     if mode == ProcessingMode.UPDATE and "ai_tags" not in update_fields:
         enable_ai = False  # No need for AI if not updating tags
 
+    # Determine if thumbnails are needed
+    enable_thumbnails = not args.no_thumbnails
+    if mode == ProcessingMode.UPDATE and "thumbnail_path" not in update_fields:
+        enable_thumbnails = False  # No need for thumbnails if not updating them
+
     # Initialize processor
     processor = ImageProcessor(
         mode=mode,
@@ -119,6 +127,9 @@ def run_pipeline(args: argparse.Namespace) -> int:
         ai_model=args.model,
         max_tags=args.max_tags,
         use_tag_cache=not args.no_cache,
+        enable_thumbnails=enable_thumbnails,
+        thumbnail_dir=args.thumbnail_dir,
+        thumbnail_width=args.thumbnail_width,
         progress_callback=print_progress if args.verbose else None
     )
 
@@ -137,6 +148,10 @@ def run_pipeline(args: argparse.Namespace) -> int:
         print(f"  AI model: {args.model}")
         print(f"  Max tags: {args.max_tags}")
         print(f"  Use cache: {not args.no_cache}")
+    print(f"  Thumbnails: {enable_thumbnails}")
+    if enable_thumbnails:
+        print(f"  Thumbnail dir: {args.thumbnail_dir}")
+        print(f"  Thumbnail width: {args.thumbnail_width}px")
     print()
 
     # Run pipeline
@@ -165,14 +180,15 @@ Processing Modes:
 
 Update Fields (comma-separated):
   Groups (shortcuts):
-    metadata   - All metadata: size, dimensions, format, camera, GPS
-    location   - location_country, location_name
-    ai_tags    - AI-generated keywords
+    metadata       - All metadata: size, dimensions, format, camera, GPS
+    location       - location_country, location_name
+    ai_tags        - AI-generated keywords
+    thumbnail_path - Generate/regenerate thumbnails
 
   Individual columns:
     location_country, location_name, file_size, format, width, height,
     exif_camera_make, exif_camera_model, exif_gps_latitude,
-    exif_gps_longitude, exif_date_taken
+    exif_gps_longitude, exif_date_taken, thumbnail_path
 
 Examples:
   python run_pipeline.py /path/to/photos                    # Process new images
@@ -201,7 +217,7 @@ Examples:
     mode_group.add_argument(
         "--update",
         metavar="FIELDS",
-        help="Update specific fields only (metadata, location, ai_tags)"
+        help="Update specific fields only (metadata, location, ai_tags, thumbnail_path)"
     )
 
     # Processing options
@@ -254,6 +270,24 @@ Examples:
         "--no-cache",
         action="store_true",
         help="Disable AI tag caching"
+    )
+
+    # Thumbnail options
+    parser.add_argument(
+        "--no-thumbnails",
+        action="store_true",
+        help="Disable thumbnail generation"
+    )
+    parser.add_argument(
+        "--thumbnail-dir",
+        default="thumbnails",
+        help="Directory to store thumbnails (default: thumbnails)"
+    )
+    parser.add_argument(
+        "--thumbnail-width",
+        type=int,
+        default=300,
+        help="Thumbnail width in pixels (default: 300)"
     )
 
     # Output options

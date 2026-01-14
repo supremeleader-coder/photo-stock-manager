@@ -26,6 +26,7 @@ from pipeline.file_scanner import FileScanner
 from pipeline.duplicate_handler import DuplicateHandler
 from pipeline.metadata_extractor import MetadataExtractor
 from pipeline.ai_tagger import AITagger
+from pipeline.thumbnail_generator import ThumbnailGenerator
 from pipeline.storage_handler import StorageHandler, VALID_UPDATE_FIELDS, FIELD_GROUPS
 
 logger = logging.getLogger(__name__)
@@ -137,6 +138,9 @@ class ImageProcessor:
         ai_model: str = "gpt-4o-mini",
         max_tags: int = 30,
         use_tag_cache: bool = True,
+        enable_thumbnails: bool = True,
+        thumbnail_dir: str = "thumbnails",
+        thumbnail_width: int = 300,
         progress_callback: Callable[[int, int, str], None] | None = None
     ):
         """
@@ -145,7 +149,7 @@ class ImageProcessor:
         Args:
             mode: Processing mode (DEFAULT, INIT, UPDATE).
             update_fields: Fields to update in UPDATE mode. Can be group names
-                          (metadata, location, ai_tags) or column names
+                          (metadata, location, ai_tags, thumbnail) or column names
                           (location_country, location_name, etc.).
             skip_existing: Skip images already in database (DEFAULT mode only).
             skip_duplicates: Skip content-duplicate images (DEFAULT mode only).
@@ -153,6 +157,9 @@ class ImageProcessor:
             ai_model: OpenAI model for tagging.
             max_tags: Maximum tags per image.
             use_tag_cache: Use cached AI tags.
+            enable_thumbnails: Whether to generate thumbnails.
+            thumbnail_dir: Directory to store thumbnails.
+            thumbnail_width: Thumbnail width in pixels.
             progress_callback: Callback(current, total, filename) for progress.
         """
         self.mode = mode
@@ -160,6 +167,7 @@ class ImageProcessor:
         self.skip_existing = skip_existing
         self.skip_duplicates = skip_duplicates
         self.enable_ai_tagging = enable_ai_tagging
+        self.enable_thumbnails = enable_thumbnails
 
         # Validate update fields
         if self.mode == ProcessingMode.UPDATE:
@@ -181,6 +189,10 @@ class ImageProcessor:
             max_tags=max_tags,
             use_cache=use_tag_cache
         ) if enable_ai_tagging else None
+        self.thumbnail_generator = ThumbnailGenerator(
+            output_dir=thumbnail_dir,
+            width=thumbnail_width
+        ) if enable_thumbnails else None
         self.storage = StorageHandler()
         self.progress_callback = progress_callback
 
@@ -302,6 +314,25 @@ class ImageProcessor:
 
             result.success = True
             result.image_id = image.id
+
+            # Stage 6: Thumbnail Generation
+            if self.thumbnail_generator:
+                logger.debug(f"Generating thumbnail: {filepath.name}")
+                try:
+                    thumb_path = self.thumbnail_generator.generate(
+                        filepath,
+                        image_id=image.id,
+                        filename=filepath.stem
+                    )
+                    if thumb_path:
+                        self.storage.update_fields(
+                            image.id,
+                            ["thumbnail_path"],
+                            thumbnail_path=thumb_path
+                        )
+                except Exception as e:
+                    logger.warning(f"Thumbnail generation failed for {filepath.name}: {e}")
+
             result.processing_time = time.time() - start_time
 
             logger.info(
@@ -355,10 +386,12 @@ class ImageProcessor:
             # Extract data based on requested columns
             metadata = None
             ai_tags = None
+            thumbnail_path = None
 
-            # Need metadata if any non-ai_tags column is requested
-            needs_metadata = bool(columns_needed - {"ai_tags"})
+            # Need metadata if any non-ai_tags/non-thumbnail column is requested
+            needs_metadata = bool(columns_needed - {"ai_tags", "thumbnail_path"})
             needs_ai_tags = "ai_tags" in columns_needed
+            needs_thumbnail = "thumbnail_path" in columns_needed
 
             if needs_metadata:
                 logger.debug(f"Extracting metadata: {filepath.name}")
@@ -373,12 +406,25 @@ class ImageProcessor:
                     logger.warning(f"AI tagging failed for {filepath.name}: {e}")
                     ai_tags = None
 
+            if needs_thumbnail and self.thumbnail_generator:
+                logger.debug(f"Generating thumbnail: {filepath.name}")
+                try:
+                    thumbnail_path = self.thumbnail_generator.generate(
+                        filepath,
+                        image_id=existing.id,
+                        filename=filepath.stem
+                    )
+                except Exception as e:
+                    logger.warning(f"Thumbnail generation failed for {filepath.name}: {e}")
+                    thumbnail_path = None
+
             # Update the record
             success = self.storage.update_fields(
                 existing.id,
                 self.update_fields,
                 metadata=metadata,
-                ai_tags=ai_tags
+                ai_tags=ai_tags,
+                thumbnail_path=thumbnail_path
             )
 
             if success:
@@ -463,6 +509,24 @@ class ImageProcessor:
 
             # Update record
             self.storage.mark_completed(image.id, ai_tags)
+
+            # Generate thumbnail
+            if self.thumbnail_generator:
+                try:
+                    thumb_path = self.thumbnail_generator.generate(
+                        filepath,
+                        image_id=image.id,
+                        filename=filepath.stem
+                    )
+                    if thumb_path:
+                        self.storage.update_fields(
+                            image.id,
+                            ["thumbnail_path"],
+                            thumbnail_path=thumb_path
+                        )
+                except Exception as e:
+                    logger.warning(f"Thumbnail generation failed for {filepath.name}: {e}")
+
             result.success = True
             result.processing_time = time.time() - start_time
 
@@ -480,6 +544,8 @@ def process_folder(
     update_fields: list[str] | None = None,
     skip_existing: bool = True,
     enable_ai: bool = True,
+    enable_thumbnails: bool = True,
+    thumbnail_dir: str = "thumbnails",
     verbose: bool = False
 ) -> PipelineStats:
     """
@@ -492,6 +558,8 @@ def process_folder(
         update_fields: Fields to update in UPDATE mode.
         skip_existing: Skip already-processed images (DEFAULT mode).
         enable_ai: Enable AI tagging.
+        enable_thumbnails: Enable thumbnail generation.
+        thumbnail_dir: Directory to store thumbnails.
         verbose: Print progress to console.
 
     Returns:
@@ -506,6 +574,8 @@ def process_folder(
         update_fields=update_fields,
         skip_existing=skip_existing,
         enable_ai_tagging=enable_ai,
+        enable_thumbnails=enable_thumbnails,
+        thumbnail_dir=thumbnail_dir,
         progress_callback=progress if verbose else None
     )
 
