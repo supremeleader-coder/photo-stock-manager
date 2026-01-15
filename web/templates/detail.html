@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ image.filename }} - Photo Library</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+            min-height: 100vh;
+        }
+
+        header {
+            background: #2a2a2a;
+            padding: 15px 20px;
+            border-bottom: 1px solid #333;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        header a {
+            color: #4a9eff;
+            text-decoration: none;
+            font-size: 14px;
+        }
+
+        header h1 {
+            font-size: 18px;
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .container {
+            display: flex;
+            min-height: calc(100vh - 60px);
+        }
+
+        .image-section {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background: #111;
+        }
+
+        .image-section img {
+            max-width: 100%;
+            max-height: 80vh;
+            border-radius: 4px;
+        }
+
+        .image-section .no-thumb {
+            color: #666;
+        }
+
+        .sidebar {
+            width: 350px;
+            background: #2a2a2a;
+            padding: 25px;
+            overflow-y: auto;
+        }
+
+        .section {
+            margin-bottom: 25px;
+        }
+
+        .section-title {
+            font-size: 12px;
+            text-transform: uppercase;
+            color: #666;
+            margin-bottom: 10px;
+            letter-spacing: 0.5px;
+        }
+
+        .field {
+            margin-bottom: 12px;
+        }
+
+        .field-label {
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 3px;
+        }
+
+        .field-value {
+            font-size: 14px;
+        }
+
+        .field-value.highlight {
+            color: #4a9eff;
+        }
+
+        .tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .tag {
+            background: #3a3a3a;
+            padding: 5px 12px;
+            border-radius: 15px;
+            font-size: 13px;
+            color: #ccc;
+        }
+
+        .filepath {
+            font-family: monospace;
+            font-size: 12px;
+            background: #1a1a1a;
+            padding: 10px;
+            border-radius: 4px;
+            word-break: break-all;
+            color: #888;
+        }
+
+        @media (max-width: 900px) {
+            .container {
+                flex-direction: column;
+            }
+            .sidebar {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <a href="/">&larr; Back to Gallery</a>
+        <h1>{{ image.filename }}</h1>
+    </header>
+
+    <div class="container">
+        <div class="image-section">
+            {% if image.thumbnail_path %}
+            <img src="{{ image.thumbnail_path|thumbnail_url }}" alt="{{ image.filename }}">
+            {% else %}
+            <span class="no-thumb">No thumbnail available</span>
+            {% endif %}
+        </div>
+
+        <div class="sidebar">
+            <div class="section">
+                <div class="section-title">Image Info</div>
+                <div class="field">
+                    <div class="field-label">Dimensions</div>
+                    <div class="field-value">{{ image.width }} x {{ image.height }} pixels</div>
+                </div>
+                <div class="field">
+                    <div class="field-label">File Size</div>
+                    <div class="field-value">{{ image.file_size|format_size }}</div>
+                </div>
+                <div class="field">
+                    <div class="field-label">Format</div>
+                    <div class="field-value">{{ image.format or 'Unknown' }}</div>
+                </div>
+            </div>
+
+            {% if image.location_name or image.location_country %}
+            <div class="section">
+                <div class="section-title">Location</div>
+                <div class="field">
+                    <div class="field-value highlight">
+                        {{ image.location_name or '' }}{% if image.location_name and image.location_country %}, {% endif %}{{ image.location_country or '' }}
+                    </div>
+                </div>
+                {% if image.exif_gps_latitude and image.exif_gps_longitude %}
+                <div class="field">
+                    <div class="field-label">Coordinates</div>
+                    <div class="field-value">{{ "%.6f"|format(image.exif_gps_latitude) }}, {{ "%.6f"|format(image.exif_gps_longitude) }}</div>
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            {% if image.exif_camera_make or image.exif_camera_model or image.exif_date_taken %}
+            <div class="section">
+                <div class="section-title">Camera</div>
+                {% if image.exif_camera_make or image.exif_camera_model %}
+                <div class="field">
+                    <div class="field-label">Camera</div>
+                    <div class="field-value">{{ image.exif_camera_make or '' }} {{ image.exif_camera_model or '' }}</div>
+                </div>
+                {% endif %}
+                {% if image.exif_date_taken %}
+                <div class="field">
+                    <div class="field-label">Date Taken</div>
+                    <div class="field-value">{{ image.exif_date_taken.strftime('%Y-%m-%d %H:%M') }}</div>
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            {% if image.ai_tags %}
+            <div class="section">
+                <div class="section-title">AI Tags ({{ image.ai_tags|length }})</div>
+                <div class="tags">
+                    {% for tag in image.ai_tags %}
+                    <span class="tag">{{ tag }}</span>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            <div class="section">
+                <div class="section-title">File Path</div>
+                <div class="filepath">{{ image.filepath }}</div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
