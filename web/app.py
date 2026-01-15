@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from db.database import session_scope
 from db.models import Image, ProcessingStatus
+from web.filters import gallery_filters
 
 app = Flask(__name__)
 
@@ -28,17 +29,24 @@ def gallery():
     per_page = 24
 
     with session_scope() as session:
-        # Get total count
-        total = session.query(Image).filter(
+        # Base query - completed images only
+        base_query = session.query(Image).filter(
             Image.processing_status == ProcessingStatus.COMPLETED
-        ).count()
+        )
+
+        # Apply all active filters
+        filtered_query = gallery_filters.apply_filters(base_query, request.args)
+
+        # Get total count (after filters)
+        total = filtered_query.count()
 
         # Get paginated images
-        images = session.query(Image).filter(
-            Image.processing_status == ProcessingStatus.COMPLETED
-        ).order_by(Image.created_at.desc()).offset(
+        images = filtered_query.order_by(Image.created_at.desc()).offset(
             (page - 1) * per_page
         ).limit(per_page).all()
+
+        # Get filter options for template
+        filter_options = gallery_filters.get_filter_options(session)
 
         # Convert to list of dicts for template
         image_list = []
@@ -57,6 +65,12 @@ def gallery():
                 "exif_date_taken": img.exif_date_taken,
             })
 
+    # Get currently active filter values for template
+    active_filters = {
+        f.param_name: request.args.get(f.param_name, "")
+        for f in gallery_filters.get_all()
+    }
+
     total_pages = (total + per_page - 1) // per_page
 
     return render_template(
@@ -64,7 +78,9 @@ def gallery():
         images=image_list,
         page=page,
         total_pages=total_pages,
-        total=total
+        total=total,
+        filters=filter_options,
+        active_filters=active_filters,
     )
 
 
@@ -128,9 +144,23 @@ def get_thumbnail_url(thumbnail_path):
     return f"/thumbnails/{path_str}"
 
 
+def url_with_params(**overrides):
+    """Build URL preserving current params with overrides."""
+    args = request.args.to_dict()
+    args.update(overrides)
+    # Remove empty values
+    args = {k: v for k, v in args.items() if v}
+    if args:
+        return "/?" + "&".join(f"{k}={v}" for k, v in args.items())
+    return "/"
+
+
 # Register template filters
 app.jinja_env.filters["format_size"] = format_size
 app.jinja_env.filters["thumbnail_url"] = get_thumbnail_url
+
+# Register template globals
+app.jinja_env.globals["url_with_params"] = url_with_params
 
 
 if __name__ == "__main__":
