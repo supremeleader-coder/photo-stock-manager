@@ -115,10 +115,7 @@ class FileSizeFilter(BaseFilter):
 
     # Predefined size ranges (in bytes)
     SIZE_RANGES = {
-        "small": ("Under 1 MB", 0, 1 * 1024 * 1024),
-        "medium": ("1-5 MB", 1 * 1024 * 1024, 5 * 1024 * 1024),
-        "large": ("5-20 MB", 5 * 1024 * 1024, 20 * 1024 * 1024),
-        "xlarge": ("Over 20 MB", 20 * 1024 * 1024, None),
+        "large": (">4 MB", 4 * 1024 * 1024, None),
     }
 
     def get_options(self, session: Session) -> list[FilterOption]:
