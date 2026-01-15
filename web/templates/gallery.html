@@ -154,6 +154,88 @@
             padding: 60px;
             color: #666;
         }
+
+        /* Filter Bar Styles */
+        .filter-bar {
+            background: #2a2a2a;
+            padding: 15px 20px;
+            border-bottom: 1px solid #333;
+        }
+
+        .filter-form {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            align-items: flex-end;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .filter-group label {
+            font-size: 11px;
+            text-transform: uppercase;
+            color: #666;
+            letter-spacing: 0.5px;
+        }
+
+        .filter-group select {
+            background: #1a1a1a;
+            border: 1px solid #444;
+            border-radius: 4px;
+            color: #fff;
+            padding: 8px 12px;
+            font-size: 14px;
+            min-width: 150px;
+            cursor: pointer;
+        }
+
+        .filter-group select:hover {
+            border-color: #555;
+        }
+
+        .filter-group select:focus {
+            outline: none;
+            border-color: #4a9eff;
+        }
+
+        .clear-filters {
+            color: #4a9eff;
+            text-decoration: none;
+            font-size: 13px;
+            padding: 8px 12px;
+        }
+
+        .clear-filters:hover {
+            text-decoration: underline;
+        }
+
+        .active-filter-count {
+            background: #4a9eff;
+            color: #fff;
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 10px;
+            margin-left: 5px;
+        }
+
+        @media (max-width: 600px) {
+            .filter-form {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .filter-group select {
+                width: 100%;
+            }
+
+            .clear-filters {
+                text-align: center;
+            }
+        }
     </style>
 </head>
 <body>
@@ -161,6 +243,31 @@
         <h1>Photo Library</h1>
         <div class="stats">{{ total }} images</div>
     </header>
+
+    {% if filters %}
+    <div class="filter-bar">
+        <form class="filter-form" method="GET" action="/">
+            {% for param_name, filter_data in filters.items() %}
+            <div class="filter-group">
+                <label for="filter-{{ param_name }}">{{ filter_data.label }}</label>
+                <select name="{{ param_name }}" id="filter-{{ param_name }}" onchange="this.form.submit()">
+                    <option value="">All</option>
+                    {% for option in filter_data.options %}
+                    <option value="{{ option.value }}" {% if active_filters[param_name] == option.value %}selected{% endif %}>
+                        {{ option.label }} ({{ option.count }})
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endfor %}
+
+            {% set active_count = active_filters.values()|select|list|length %}
+            {% if active_count > 0 %}
+            <a href="/" class="clear-filters">Clear All<span class="active-filter-count">{{ active_count }}</span></a>
+            {% endif %}
+        </form>
+    </div>
+    {% endif %}
 
     {% if images %}
     <div class="gallery">
@@ -204,7 +311,7 @@
     {% if total_pages > 1 %}
     <div class="pagination">
         {% if page > 1 %}
-        <a href="?page={{ page - 1 }}">Previous</a>
+        <a href="{{ url_with_params(page=page - 1) }}">Previous</a>
         {% else %}
         <span class="disabled">Previous</span>
         {% endif %}
@@ -212,7 +319,7 @@
         <span class="current">{{ page }} / {{ total_pages }}</span>
 
         {% if page < total_pages %}
-        <a href="?page={{ page + 1 }}">Next</a>
+        <a href="{{ url_with_params(page=page + 1) }}">Next</a>
         {% else %}
         <span class="disabled">Next</span>
         {% endif %}
@@ -221,8 +328,14 @@
 
     {% else %}
     <div class="empty">
+        {% set active_count = active_filters.values()|select|list|length if active_filters else 0 %}
+        {% if active_count > 0 %}
+        <p>No images match the selected filters.</p>
+        <p><a href="/" style="color: #4a9eff;">Clear all filters</a></p>
+        {% else %}
         <p>No images found.</p>
         <p>Run the pipeline to process some photos first.</p>
+        {% endif %}
     </div>
     {% endif %}
 </body>
