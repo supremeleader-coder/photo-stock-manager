@@ -403,6 +403,67 @@ class ImageRepository:
         """
         return self.update(image_id, ai_tags=tags)
 
+    def update_stock_fields(
+        self,
+        image_id: int,
+        categories: list[str] | None = None,
+        editorial: bool | None = None,
+    ) -> Image | None:
+        """
+        Update stock-related fields for an image.
+
+        Args:
+            image_id: Primary key of the image.
+            categories: List of stock categories.
+            editorial: Whether image is editorial content.
+
+        Returns:
+            Updated Image instance or None if not found.
+        """
+        update_data = {}
+        if categories is not None:
+            update_data["categories"] = categories
+        if editorial is not None:
+            update_data["editorial"] = editorial
+
+        if update_data:
+            return self.update(image_id, **update_data)
+        return self.get_by_id(image_id)
+
+    def get_ready_for_submission(self, stock_site: str) -> list[Image]:
+        """
+        Get images ready for submission to a stock site.
+
+        Returns images that:
+        - Have completed processing
+        - Have categories assigned
+        - Have not yet been submitted to the specified stock site
+
+        Args:
+            stock_site: Stock site identifier to check submissions against.
+
+        Returns:
+            List of Image instances ready for submission.
+        """
+        from db.models import StockSubmission
+
+        # Subquery for images already submitted to this site
+        subquery = select(StockSubmission.image_id).where(
+            StockSubmission.stock_site == stock_site
+        ).scalar_subquery()
+
+        stmt = select(Image).where(
+            Image.processing_status == ProcessingStatus.COMPLETED,
+            Image.categories.isnot(None),
+            Image.id.notin_(subquery),
+        ).order_by(Image.created_at.desc())
+
+        if self._session:
+            return list(self._session.execute(stmt).scalars().all())
+
+        with session_scope() as session:
+            return list(session.execute(stmt).scalars().all())
+
     # ────────────────────────────────────────────────────────────────────────────
     # Delete Operations
     # ────────────────────────────────────────────────────────────────────────────
