@@ -31,17 +31,20 @@ from typing import List, Optional
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     DateTime,
     Enum,
+    ForeignKey,
     Index,
     Integer,
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class ProcessingStatus(PyEnum):
@@ -50,6 +53,14 @@ class ProcessingStatus(PyEnum):
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+class SubmissionStatus(PyEnum):
+    """Status for stock photo submissions."""
+    PENDING = "pending"
+    SUBMITTED = "submitted"
+    APPROVED = "approved"
+    REJECTED = "rejected"
 
 
 class Base(DeclarativeBase):
@@ -96,6 +107,10 @@ class Image(Base):
     # AI-generated tags (stored as JSON array)
     ai_tags: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True, default=list)
 
+    # Stock-related fields
+    categories: Mapped[Optional[List[str]]] = mapped_column(JSONB, nullable=True, default=list)
+    editorial: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
     # Processing status
     processing_status: Mapped[ProcessingStatus] = mapped_column(
         Enum(ProcessingStatus, name="processing_status_enum"),
@@ -116,6 +131,11 @@ class Image(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=func.now()
+    )
+
+    # Relationships
+    submissions: Mapped[List["StockSubmission"]] = relationship(
+        "StockSubmission", back_populates="image", cascade="all, delete-orphan"
     )
 
     # Indexes for frequently queried columns
@@ -153,9 +173,92 @@ class Image(Base):
             "location_name": self.location_name,
             "thumbnail_path": self.thumbnail_path,
             "ai_tags": self.ai_tags or [],
+            "categories": self.categories or [],
+            "editorial": self.editorial,
             "processing_status": self.processing_status.value,
             "error_message": self.error_message,
             "processed_at": self.processed_at.isoformat() if self.processed_at else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class StockSubmission(Base):
+    """
+    SQLAlchemy model for tracking stock photo submissions.
+
+    Tracks submissions to stock photography sites like Shutterstock,
+    Adobe Stock, etc. Each image can have multiple submissions (one per site).
+    """
+    __tablename__ = "stock_submissions"
+
+    # Primary key
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    # Foreign key to images table
+    image_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("images.id", ondelete="CASCADE"), nullable=False
+    )
+
+    # Stock site information
+    stock_site: Mapped[str] = mapped_column(String(50), nullable=False)  # e.g., "shutterstock"
+    stock_photo_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # Their ID
+
+    # Submission status
+    status: Mapped[SubmissionStatus] = mapped_column(
+        Enum(SubmissionStatus, name="submission_status_enum"),
+        nullable=False,
+        default=SubmissionStatus.PENDING
+    )
+
+    # Timestamps for tracking
+    submitted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Rejection details
+    rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Record timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now()
+    )
+
+    # Relationship back to Image
+    image: Mapped["Image"] = relationship("Image", back_populates="submissions")
+
+    # Indexes and constraints
+    __table_args__ = (
+        Index("idx_submissions_image_id", "image_id"),
+        Index("idx_submissions_stock_site", "stock_site"),
+        Index("idx_submissions_status", "status"),
+        UniqueConstraint("image_id", "stock_site", name="uq_image_stock_site"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<StockSubmission(id={self.id}, image_id={self.image_id}, "
+            f"site='{self.stock_site}', status={self.status.value})>"
+        )
+
+    def to_dict(self) -> dict:
+        """Convert model to dictionary for serialization."""
+        return {
+            "id": self.id,
+            "image_id": self.image_id,
+            "stock_site": self.stock_site,
+            "stock_photo_id": self.stock_photo_id,
+            "status": self.status.value,
+            "submitted_at": self.submitted_at.isoformat() if self.submitted_at else None,
+            "reviewed_at": self.reviewed_at.isoformat() if self.reviewed_at else None,
+            "rejection_reason": self.rejection_reason,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

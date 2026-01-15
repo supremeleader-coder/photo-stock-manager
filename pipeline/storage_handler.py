@@ -33,6 +33,7 @@ FIELD_GROUPS = {
     "location": ["location_country", "location_name"],
     "ai_tags": ["ai_tags"],
     "thumbnail_path": ["thumbnail_path"],
+    "stock": ["categories", "editorial"],
 }
 
 # All valid individual column names
@@ -43,6 +44,7 @@ VALID_COLUMNS = {
     "location_country", "location_name",
     "ai_tags",
     "thumbnail_path",
+    "categories", "editorial",
 }
 
 # Combined valid field names (groups + individual columns)
@@ -295,7 +297,9 @@ class StorageHandler:
         fields: list[str],
         metadata: ImageMetadata | None = None,
         ai_tags: list[str] | None = None,
-        thumbnail_path: str | None = None
+        thumbnail_path: str | None = None,
+        categories: list[str] | None = None,
+        editorial: bool | None = None,
     ) -> bool:
         """
         Update only specific fields for an existing image.
@@ -303,10 +307,12 @@ class StorageHandler:
         Args:
             image_id: ID of the image record.
             fields: List of fields to update. Can be group names ('metadata',
-                   'location', 'ai_tags', 'thumbnail') or individual column names.
+                   'location', 'ai_tags', 'thumbnail', 'stock') or individual column names.
             metadata: New metadata (required for metadata/location fields).
             ai_tags: New AI tags (required for 'ai_tags' field).
             thumbnail_path: Path to thumbnail (required for 'thumbnail' field).
+            categories: Stock categories (required for 'categories' field).
+            editorial: Editorial flag (required for 'editorial' field).
 
         Returns:
             True if update successful, False otherwise.
@@ -335,6 +341,12 @@ class StorageHandler:
                 elif column == "thumbnail_path" and thumbnail_path is not None:
                     image.thumbnail_path = thumbnail_path
                     updated_fields.append("thumbnail_path")
+                elif column == "categories" and categories is not None:
+                    image.categories = categories
+                    updated_fields.append("categories")
+                elif column == "editorial" and editorial is not None:
+                    image.editorial = editorial
+                    updated_fields.append("editorial")
                 elif metadata:
                     if column == "file_size":
                         image.file_size = metadata.file_size
