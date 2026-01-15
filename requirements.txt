@@ -18,6 +18,9 @@ python-dotenv>=1.0.0
 # CLI utilities (Phase 2)
 tqdm>=4.65.0
 
+# HTTP client for stock integrations
+requests>=2.31.0
+
 # Future web interface (Phase 3)
 # flask>=3.0.0
 # flask-cors>=4.0.0
