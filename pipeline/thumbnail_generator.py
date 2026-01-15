@@ -10,7 +10,7 @@ import logging
 import os
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +80,13 @@ class ThumbnailGenerator:
             thumb_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Generate thumbnail
-            with Image.open(source_path) as img:
+            img = Image.open(source_path)
+            try:
+                # Apply EXIF orientation (fixes upside-down/rotated photos)
+                transposed = ImageOps.exif_transpose(img)
+                if transposed is not None:
+                    img = transposed
+
                 # Convert to RGB if necessary (for JPEG output)
                 if img.mode in ("RGBA", "P"):
                     img = img.convert("RGB")
@@ -104,8 +110,10 @@ class ThumbnailGenerator:
                     optimize=True
                 )
 
-            logger.debug(f"Generated thumbnail: {thumb_path}")
-            return str(thumb_path)
+                logger.debug(f"Generated thumbnail: {thumb_path}")
+                return str(thumb_path)
+            finally:
+                img.close()
 
         except Exception as e:
             logger.error(f"Failed to generate thumbnail for {source_path}: {e}")
